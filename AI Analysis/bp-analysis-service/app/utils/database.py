@@ -4,6 +4,7 @@
 from supabase import create_client, Client
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+import os
 
 from app.config import get_settings
 
@@ -18,6 +19,13 @@ class Database:
         """Get or create Supabase client."""
         if cls._client is None:
             settings = get_settings()
+            
+            # Debug: print connection info
+            print(f"Connecting to Supabase: {settings.supabase_url[:30]}...")
+            
+            if not settings.supabase_url or not settings.supabase_service_key:
+                raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env file")
+            
             cls._client = create_client(
                 settings.supabase_url,
                 settings.supabase_service_key
@@ -27,11 +35,29 @@ class Database:
     @classmethod
     def fetch_patient(cls, patient_id: str) -> Optional[Dict[str, Any]]:
         """Fetch patient profile."""
-        client = cls.get_client()
-        result = client.table("patients").select(
-            "*, users!inner(name, email, age)"
-        ).eq("id", patient_id).single().execute()
-        return result.data
+        try:
+            client = cls.get_client()
+            
+            # First try to get patient with user join
+            result = client.table("patients").select(
+                "*, users(name, email, age)"
+            ).eq("id", patient_id).execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            
+            # If not found by patient id, try by user_id
+            result = client.table("patients").select(
+                "*, users(name, email, age)"
+            ).eq("user_id", patient_id).execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            
+            return None
+        except Exception as e:
+            print(f"Error fetching patient: {e}")
+            raise
     
     @classmethod
     def fetch_blood_pressure_readings(
